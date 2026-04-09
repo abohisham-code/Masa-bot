@@ -47,6 +47,7 @@ MY_NICK   = "ابن سـ☆☆☆ـوريـــا"
 MASA_NICK = "عطـ❃⊰ـرـر آإليـ❃⊰ـآإسميـن"  # أدمن ثابتة
 ROOMS = [
     "شمس@conference.syriatalk.info",
+    "المرساة@conference.syriatalk.info",
     "راقيات@conference.syriatalk.info"
 ]
 MEMORY_FILE = "games_memory.json"
