@@ -9,9 +9,16 @@ import sys
 import os
 import random
 import json
-# import ssl  # ⭐ قم بإزالة التعليق لتفعيل TLS (موصى به)
+# import ssl
 from flask import Flask
 from threading import Thread
+
+# ============================================================
+# تعطيل اللوغات تماماً
+# ============================================================
+logging.basicConfig(level=logging.ERROR)  # يظهر فقط الأخطاء الحقيقية
+log = logging.getLogger("games_bot")
+log.setLevel(logging.ERROR)
 
 # ============================================================
 # Flask - Keep Alive
@@ -35,12 +42,6 @@ def keep_alive():
     t.start()
 
 # ============================================================
-# اللوغ (Log) المحسن
-# ============================================================
-logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(name)s: %(message)s')
-log = logging.getLogger("games_bot")
-
-# ============================================================
 # الإعدادات
 # ============================================================
 SERVER    = "syriatalk.info"
@@ -62,7 +63,7 @@ ROOM_DEFAULT_NICKS = {
 }
 
 # ============================================================
-# ✅ كل الأسئلة - 50 سؤال لكل فئة
+# جميع الأسئلة - 50 سؤال لكل فئة (نفس الأسئلة موجودة)
 # ============================================================
 TRIVIA_QUESTIONS = [
     {"q": "🧠 شو عاصمة اليابان؟", "a": "طوكيو"},
@@ -462,7 +463,7 @@ def check_xo_winner(board):
     return 0
 
 # ============================================================
-# XMPP Connection (معدلة لدعم TLS)
+# XMPP Connection (بدون لوغات)
 # ============================================================
 class XMPPConnection:
     def __init__(self, jid, password, server, port):
@@ -478,16 +479,10 @@ class XMPPConnection:
 
     async def connect(self):
         try:
-            log.info(f"🔌 جاري الاتصال بـ {self.server}:{self.port} ...")
-            # ⭐ إذا أردت تفعيل TLS، أزل التعليق عن السطرين التاليين
-            # ssl_context = ssl.create_default_context()
-            # self.reader, self.writer = await asyncio.open_connection(self.server, self.port, ssl=ssl_context)
             self.reader, self.writer = await asyncio.open_connection(self.server, self.port)
             self.connected = True
-            log.info("✅ تم الاتصال بالسيرفر!")
             return True
         except Exception as e:
-            log.error(f"❌ فشل الاتصال: {e}")
             return False
 
     async def send_raw(self, data):
@@ -503,8 +498,7 @@ class XMPPConnection:
             return decoded
         except asyncio.TimeoutError:
             return ""
-        except Exception as e:
-            log.error(f"❌ recv error: {e}")
+        except Exception:
             return ""
 
     async def open_stream(self):
@@ -517,7 +511,6 @@ class XMPPConnection:
         )
 
     async def sasl_plain_auth(self):
-        log.info("🔐 إرسال stream open...")
         await self.open_stream()
         attempts = 0
         accumulated = ""
@@ -527,22 +520,17 @@ class XMPPConnection:
                 await asyncio.sleep(0.3)
                 attempts += 1
                 if attempts > 20:
-                    log.error("❌ انتهت المحاولات للحصول على mechanisms")
                     return False
                 continue
             accumulated += data
-            log.info(f"📥 بيانات stream ({len(data)} بايت)")
             if "mechanisms" in accumulated:
-                log.info("✅ تم استلام mechanisms")
                 break
             attempts += 1
             if attempts > 20:
-                log.error(f"❌ ما وصل mechanisms بعد 20 محاولة. آخر بيانات: {accumulated[:200]}")
                 return False
 
         auth_str = f"\0{self.jid.split('@')[0]}\0{self.password}"
         auth_b64 = base64.b64encode(auth_str.encode()).decode()
-        log.info("🔑 إرسال PLAIN auth...")
         await self.send_raw(f"<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>{auth_b64}</auth>")
 
         resp = ""
@@ -553,55 +541,37 @@ class XMPPConnection:
                 break
             await asyncio.sleep(0.3)
 
-        log.info(f"📥 رد المصادقة: {resp[:200]}")
         if "success" in resp:
-            log.info("✅ مصادقة ناجحة! إرسال stream جديد...")
             await self.open_stream()
-            # انتظر features السيرفر
             features = ""
             for _ in range(5):
                 chunk = await self.recv_raw(timeout=5)
                 features += chunk
                 if chunk: break
-            log.info(f"📥 stream features بعد auth: {features[:150]}")
 
-            log.info("🔗 إرسال bind resource...")
             await self.send_raw("<iq type='set' id='bind1'><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>GamesBot_1.0</resource></bind></iq>")
             bind_resp = ""
             for _ in range(5):
                 chunk = await self.recv_raw(timeout=5)
                 bind_resp += chunk
                 if chunk: break
-            log.info(f"📥 رد bind: {bind_resp[:150]}")
 
-            log.info("📋 إرسال session...")
             await self.send_raw("<iq type='set' id='sess1'><session xmlns='urn:ietf:params:xml:ns:xmpp-session'/></iq>")
             sess_resp = ""
             for _ in range(5):
                 chunk = await self.recv_raw(timeout=5)
                 sess_resp += chunk
                 if chunk: break
-            log.info(f"📥 رد session: {sess_resp[:150]}")
 
-            log.info("📡 إرسال presence أولي...")
             await self.send_raw("<presence><show>chat</show><status>🎮 بوت الألعاب</status></presence>")
-            pres_data = ""
-            for _ in range(5):
-                chunk = await self.recv_raw(timeout=3)
-                pres_data += chunk
-                if pres_data: break
-            if pres_data:
-                log.info(f"📥 رد presence: {pres_data[:200]}")
-            log.info("✅ المصادقة اكتملت بنجاح!")
             return True
-        log.error(f"❌ فشل المصادقة: {resp[:300]}")
         return False
 
     async def send_message(self, to_jid, body, mtype="groupchat"):
         await self.send_raw(f"<message to='{to_jid}' type='{mtype}'><body>{escape_xml(body)}</body></message>")
 
 # ============================================================
-# GamesBot (مع إصلاح دخول الرومات)
+# GamesBot
 # ============================================================
 class GamesBot:
     def __init__(self, conn, nick):
@@ -613,7 +583,6 @@ class GamesBot:
         self.memory.setdefault("admins", [])
         self.memory.setdefault("room_nicks", {})
 
-        # حالة الألعاب
         self.active_game     = {}
         self.guess_games     = {}
         self.trivia_games    = {}
@@ -634,7 +603,7 @@ class GamesBot:
         try:
             with open(MEMORY_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.memory, f, ensure_ascii=False, indent=2)
-        except Exception as e: log.error(f"Save error: {e}")
+        except Exception: pass
 
     def is_owner(self, nick): return nick == MY_NICK
     def is_admin(self, nick): return self.is_owner(nick) or nick == MASA_NICK or nick in self.memory.get("admins", [])
@@ -653,51 +622,22 @@ class GamesBot:
             "╚══════════ 🎮 ══════════╝"
         )
 
-    # ✅ دالة دخول الروم المحسّنة
     async def join_room(self, room_jid):
         room_nick = self.get_room_nick(room_jid)
-        log.info(f"⏳ محاولة دخول الغرفة: {room_jid}/{room_nick}")
-
         await self.conn.send_raw(
             f"<presence to='{room_jid}/{room_nick}'>"
             f"<x xmlns='http://jabber.org/protocol/muc'/>"
             f"</presence>"
         )
-
-        # انتظر 5 ثوانٍ للحصول على أي رد من السيرفر
-        deadline = asyncio.get_event_loop().time() + 5.0
-        accumulated = ""
-        while asyncio.get_event_loop().time() < deadline:
-            remaining = deadline - asyncio.get_event_loop().time()
-            data = await self.conn.recv_raw(timeout=min(remaining + 0.1, 3))
-            if data:
-                accumulated += data
-                log.info(f"📥 رد السيرفر ({len(data)}ب): {data[:400]}")
-
-        # فحص إذا كان في خطأ صريح بالرد
-        if accumulated:
-            self.conn.buffer += accumulated
-            if 'type=\'error\'' in accumulated or 'type="error"' in accumulated:
-                if room_jid in accumulated:
-                    log.error(f"❌ الغرفة {room_jid} أعطت خطأ")
-                    return False
-
-        # نعتبر الدخول ناجحاً إذا لم يصلنا خطأ
-        log.info(f"✅ تم إرسال طلب دخول {room_jid} - الانتقال للروم التالية")
+        await asyncio.sleep(2)
         return True
 
     async def join_all_rooms(self):
         banner = self.get_banner()
         for room in self.rooms:
-            log.info(f"🔄 محاولة دخول الروم: {room}")
-            ok = await self.join_room(room)
-            if ok:
-                await asyncio.sleep(2)
-                log.info(f"📢 إرسال بانر إلى {room}")
-                await self.conn.send_message(room, banner)
-                log.info(f"✉️ تم إرسال البانر إلى {room}")
-            else:
-                log.error(f"❌ تعذر دخول الغرفة: {room}")
+            await self.join_room(room)
+            await self.conn.send_message(room, banner)
+            await asyncio.sleep(1)
 
     async def start(self):
         if not await self.conn.sasl_plain_auth(): return False
@@ -705,7 +645,6 @@ class GamesBot:
         await self.conn.send_raw("<presence><show>chat</show><status>🎮 بوت الألعاب الترفيهي</status></presence>")
         await self.join_all_rooms()
         asyncio.create_task(self._recv_loop())
-        log.info("🚀 البوت يعمل الآن بكامل طاقته!")
         return True
 
     async def _recv_loop(self):
@@ -730,8 +669,6 @@ class GamesBot:
 
     async def _handle_stanza(self, xml_str):
         try:
-            log.debug(f"📡 STREAM DATA: {xml_str[:150]}...")
-
             root = ET.fromstring(xml_str.strip())
             tag  = strip_ns(root.tag)
             frm  = root.attrib.get("from", "")
@@ -745,7 +682,6 @@ class GamesBot:
             if tag == "presence":
                 ptype = root.attrib.get("type", "")
                 if ptype == "unavailable" and sender_nick == self.get_room_nick(room):
-                    log.warning(f"⚠️ البوت خرج من الروم: {room} - إعادة دخول تلقائية...")
                     await asyncio.sleep(2)
                     await self.join_room(room)
 
@@ -763,7 +699,7 @@ class GamesBot:
                 elif mtype == "chat" and sender_nick:
                     await self._handle_private(frm, sender_nick, body)
 
-        except Exception as e: log.error(f"stanza error: {e}")
+        except Exception: pass
 
     async def _handle_group(self, room, nick, body):
         def reply(msg): asyncio.create_task(self.conn.send_message(room, msg))
@@ -875,7 +811,6 @@ async def main():
     keep_alive()
     while True:
         try:
-            log.info("🚀 بدء تشغيل بوت الألعاب المعدل...")
             conn = XMPPConnection(JID, PASSWORD, SERVER, PORT)
             if not await conn.connect():
                 await asyncio.sleep(15); continue
@@ -892,8 +827,7 @@ async def main():
                 except:
                     ping_fail += 1
                     if ping_fail >= 3: conn.connected = False; break
-        except Exception as e:
-            log.error(f"❌ خطأ رئيسي: {e}")
+        except Exception:
             await asyncio.sleep(10)
 
 if __name__ == "__main__":
