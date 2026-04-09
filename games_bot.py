@@ -9,6 +9,7 @@ import sys
 import os
 import random
 import json
+# import ssl  # ⭐ قم بإزالة التعليق لتفعيل TLS (موصى به)
 from flask import Flask
 from threading import Thread
 
@@ -46,7 +47,7 @@ SERVER    = "syriatalk.info"
 PORT      = 5222
 JID       = "shoq-hanen@syriatalk.info"
 PASSWORD  = "shoq-hanen"
-NICK = "سـلـطـان الألـعـاب 🎮" # اللقب الجديد هنا
+NICK      = "مـرافـق مـآإسـة"
 MY_NICK   = "ابن سـ☆☆☆ـوريـــا"
 MASA_NICK = "عطـ❃⊰ـرـر آإليـ❃⊰ـآإسميـن"
 ROOMS = [
@@ -56,11 +57,13 @@ ROOMS = [
 MEMORY_FILE = "games_memory.json"
 
 ROOM_DEFAULT_NICKS = {
-    "شمس@conference.syriatalk.info":   "مـرافـق مـآإسـة",
+    "شمس@conference.syriatalk.info":    "بوت الألعاب",
     "راقيات@conference.syriatalk.info": "Tasaly_MØHΛMΣD",
 }
 
-# [قائمة الأسئلة والألعاب تبقى كما هي بدون تغيير لضمان عمل المنطق الأساسي]
+# ============================================================
+# ✅ كل الأسئلة كاملة بدون اختصار
+# ============================================================
 TRIVIA_QUESTIONS = [
     {"q": "🧠 شو عاصمة اليابان؟", "a": "طوكيو"},
     {"q": "🧠 كم يوم بالسنة؟", "a": "365"},
@@ -165,7 +168,7 @@ WOMEN_QUESTIONS = [
 
 MEN_QUESTIONS = [
     {"q": "💪 شو أقوى سيارة بالعالم من حيث الحصان؟", "a": "بوغاتي"},
-    {"q": "💪 شو أشهر ماركة ساعات رجالية? ", "a": "رولكس"},
+    {"q": "💪 شو أشهر ماركة ساعات رجالية؟ ", "a": "رولكس"},
     {"q": "💪 كم سيلندر بمحرك V8؟", "a": "8"},
     {"q": "💪 شو أشهر ماركة موتوسيكل؟", "a": "هارلي ديفيدسون"},
     {"q": "💪 شو اسم أشهر لعبة فيديو بالتاريخ؟", "a": "ماريو"},
@@ -246,7 +249,7 @@ def check_xo_winner(board):
     return 0
 
 # ============================================================
-# XMPP Connection
+# XMPP Connection (معدلة لدعم TLS)
 # ============================================================
 class XMPPConnection:
     def __init__(self, jid, password, server, port):
@@ -263,6 +266,9 @@ class XMPPConnection:
     async def connect(self):
         try:
             log.info(f"🔌 جاري الاتصال بـ {self.server}:{self.port} ...")
+            # ⭐ إذا أردت تفعيل TLS، أزل التعليق عن السطرين التاليين
+            # ssl_context = ssl.create_default_context()
+            # self.reader, self.writer = await asyncio.open_connection(self.server, self.port, ssl=ssl_context)
             self.reader, self.writer = await asyncio.open_connection(self.server, self.port)
             self.connected = True
             log.info("✅ تم الاتصال بالسيرفر!")
@@ -323,7 +329,7 @@ class XMPPConnection:
         await self.send_raw(f"<message to='{to_jid}' type='{mtype}'><body>{escape_xml(body)}</body></message>")
 
 # ============================================================
-# GamesBot
+# GamesBot (مع إصلاح دخول الرومات)
 # ============================================================
 class GamesBot:
     def __init__(self, conn, nick):
@@ -334,7 +340,7 @@ class GamesBot:
         self.memory.setdefault("points", {})
         self.memory.setdefault("admins", [])
         self.memory.setdefault("room_nicks", {})
-        
+
         # حالة الألعاب
         self.active_game     = {}
         self.guess_games     = {}
@@ -367,11 +373,6 @@ class GamesBot:
         self.save_memory()
     def get_points(self, room, nick): return self.memory.get("points", {}).get(room, {}).get(nick, 0)
 
-    # ============================================================
-    # التعديلات الجديدة (الاحترافية)
-    # ============================================================
-    
-    # 1. البانر الاحترافي
     def get_banner(self):
         return (
             "╔══════════ 🎮 ══════════╗\n"
@@ -380,22 +381,56 @@ class GamesBot:
             "╚══════════ 🎮 ══════════╝"
         )
 
-    # 2. دالة join_room المطورة مع التحقق من الأخطاء
+    # ✅ دالة دخول الروم المحسّنة (تنتظر رد الخادم)
     async def join_room(self, room_jid):
         room_nick = self.get_room_nick(room_jid)
-        log.info(f"📤 محاولة دخول الروم: {room_jid} باسم {room_nick}")
-        
+        log.info(f"⏳ محاولة دخول الغرفة: {room_jid}/{room_nick}")
+
         await self.conn.send_raw(
             f"<presence to='{room_jid}/{room_nick}'>"
             f"<x xmlns='http://jabber.org/protocol/muc'/>"
             f"</presence>"
         )
 
-        # استقبال الرد للتأكد من نجاح الدخول
-        await asyncio.sleep(1) # تأخير بسيط لمعالجة البيانات
-        return True
+        start_time = asyncio.get_event_loop().time()
+        timeout = 10.0
+        while True:
+            data = await self.conn.recv_raw()
+            if not data:
+                await asyncio.sleep(0.5)
+                if asyncio.get_event_loop().time() - start_time > timeout:
+                    log.error(f"❌ انتهت مهلة انتظار رد الدخول إلى {room_jid}")
+                    return False
+                continue
 
-    # 3. دالة join_all_rooms مع محاولات التكرار
+            self.conn.buffer += data
+            while '<presence' in self.conn.buffer:
+                start_idx = self.conn.buffer.find('<presence')
+                end_idx = self.conn.buffer.find('</presence>', start_idx)
+                if end_idx == -1:
+                    break
+                stanza_str = self.conn.buffer[start_idx:end_idx+len('</presence>')]
+                self.conn.buffer = self.conn.buffer[:start_idx] + self.conn.buffer[end_idx+len('</presence>'):]
+
+                try:
+                    root = ET.fromstring(stanza_str)
+                    frm = root.attrib.get('from', '')
+                    ptype = root.attrib.get('type', '')
+
+                    if frm == f"{room_jid}/{room_nick}":
+                        if ptype == 'error':
+                            error_elem = root.find('error')
+                            code = error_elem.attrib.get('code', '?') if error_elem is not None else '?'
+                            cond_elem = error_elem.find('*') if error_elem is not None else None
+                            cond = strip_ns(cond_elem.tag) if cond_elem is not None else 'unknown'
+                            log.error(f"❌ فشل دخول {room_jid} - الكود: {code} - الحالة: {cond}")
+                            return False
+                        else:
+                            log.info(f"✅ تم دخول الغرفة بنجاح: {room_jid} باسم {room_nick}")
+                            return True
+                except Exception as e:
+                    log.warning(f"تعذر تحليل stanza حضور: {e}")
+
     async def join_all_rooms(self):
         banner = self.get_banner()
         for room in self.rooms:
@@ -406,30 +441,22 @@ class GamesBot:
                 if ok:
                     success = True
                     break
-                await asyncio.sleep(2)
-            
+                await asyncio.sleep(3)
             if success:
-                log.info(f"✅ تم دخول الروم بنجاح: {room}")
                 await asyncio.sleep(1)
                 await self.conn.send_message(room, banner)
             else:
-                log.error(f"❌ فشل دخول الروم نهائياً بعد 3 محاولات: {room}")
+                log.error(f"❌ تعذر دخول الغرفة بعد كل المحاولات: {room}")
 
     async def start(self):
         if not await self.conn.sasl_plain_auth(): return False
         asyncio.create_task(self._recv_loop())
         await asyncio.sleep(2)
         await self.conn.send_raw("<presence><show>chat</show><status>🎮 بوت الألعاب الترفيهي</status></presence>")
-        
-        # استخدام النظام الجديد لدخول الرومات
         await self.join_all_rooms()
-        
         log.info("🚀 البوت يعمل الآن بكامل طاقته!")
         return True
 
-    # ============================================================
-    # حلقة الاستقبال ومعالجة Stanza
-    # ============================================================
     async def _recv_loop(self):
         while self.conn.connected:
             data = await self.conn.recv_raw()
@@ -449,9 +476,8 @@ class GamesBot:
 
     async def _handle_stanza(self, xml_str):
         try:
-            # لوج البيانات الواردة (تعديل 5)
-            log.info(f"📡 STREAM DATA: {xml_str[:150]}...")
-            
+            log.debug(f"📡 STREAM DATA: {xml_str[:150]}...")
+
             root = ET.fromstring(xml_str.strip())
             tag  = strip_ns(root.tag)
             frm  = root.attrib.get("from", "")
@@ -462,16 +488,13 @@ class GamesBot:
 
             if sender_nick in list(ROOM_DEFAULT_NICKS.values()) + [self.nick]: return
 
-            # 4. نظام Auto-Rejoin
             if tag == "presence":
                 ptype = root.attrib.get("type", "")
-                # إذا خرج البوت نفسه أو طُرد، يحاول العودة
                 if ptype == "unavailable" and sender_nick == self.get_room_nick(room):
                     log.warning(f"⚠️ البوت خرج من الروم: {room} - إعادة دخول تلقائية...")
                     await asyncio.sleep(2)
                     await self.join_room(room)
-                
-                # ترحيب خاص بماسة
+
                 if sender_nick == "ماسة" and ptype != "unavailable" and room:
                     await asyncio.sleep(1)
                     await self.conn.send_message(room, "💎 أنا هون يا ماسة 🌹\nمرافقك الخاص جاهز! ✨")
@@ -488,12 +511,10 @@ class GamesBot:
 
         except Exception as e: log.error(f"stanza error: {e}")
 
-    # [بقية الدوال _handle_group و _handle_private والألعاب تبقى كما هي]
     async def _handle_group(self, room, nick, body):
         def reply(msg): asyncio.create_task(self.conn.send_message(room, msg))
         b = body.strip()
 
-        # تحقق من الإجابات للألعاب الجارية
         if room in self.guess_games:
             try:
                 guess = int(b)
@@ -525,7 +546,6 @@ class GamesBot:
                 reply(f"🧩 صح يا {nick}! الجواب: {game['answer']} 🎉\nربحت 20 نقطة! ⭐")
                 return
 
-        # الأوامر العامة
         if b in ["العاب", "الألعاب", "اوامر"]:
             reply(
                 "🎮 ━━━ قائمة الألعاب ━━━ 🎮\n\n"
@@ -542,27 +562,31 @@ class GamesBot:
             )
             return
 
-        # منع تداخل الألعاب
         if room in self.active_game and b not in ["نقاطي", "توب", "ريستارت", "إنهاء اللعبة", "انهاء اللعبة"]:
-             if self.active_game[room] not in ["صراحة", "أكس أو", "بلاك جاك"]:
-                return # لا ترد بشيء حتى لا تسبب إزعاجاً
+            if self.active_game[room] not in ["صراحة", "أكس أو", "بلاك جاك"]:
+                return
 
-        # تشغيل الألعاب (هنا نفس منطق الكود الأصلي...)
         if b == "تخمين رقم":
             self.guess_games[room] = {"number": random.randint(1, 100), "attempts": 0}
             self.active_game[room] = "تخمين رقم"
             reply("🎯 لعبة تخمين الرقم بدأت! خمّن رقم بين 1 و 100!")
 
         elif b in ["سؤال ثقافي", "سؤال رياضي", "سؤال ديني", "سؤال نسواني", "سؤال رجالي", "سؤال فني"]:
-            q_list = {
+            q_map = {
                 "سؤال ثقافي": TRIVIA_QUESTIONS, "سؤال رياضي": SPORTS_QUESTIONS,
                 "سؤال ديني": RELIGIOUS_QUESTIONS, "سؤال نسواني": WOMEN_QUESTIONS,
                 "سؤال رجالي": MEN_QUESTIONS, "سؤال فني": ACTORS_QUESTIONS
-            }[b]
-            q = random.choice(q_list)
+            }
+            q = random.choice(q_map[b])
             self.trivia_games[room] = {"answer": q["a"]}
             self.active_game[room] = b
             reply(f"{q['q']}\n\n⏳ أسرع إجابة تربح 30 نقطة!")
+
+        elif b == "فزورة":
+            q = random.choice(RIDDLES)
+            self.riddle_games[room] = {"answer": q["a"]}
+            self.active_game[room] = "فزورة"
+            reply(f"🧩 {q['q']}\n\n⏳ أسرع إجابة تربح 20 نقطة!")
 
         elif b == "نقاطي":
             reply(f"⭐ {nick} عندك {self.get_points(room, nick)} نقطة.")
@@ -574,7 +598,8 @@ class GamesBot:
             reply("🏆 توب 5 للروم:\n" + "\n".join([f"{i}️⃣ {u}: {p} نقطة" for i,(u,p) in enumerate(top,1)]))
 
         elif b in ["إنهاء اللعبة", "انهاء اللعبة"] and self.is_admin(nick):
-            for d in [self.active_game, self.guess_games, self.trivia_games, self.riddle_games]: d.pop(room, None)
+            for d in [self.active_game, self.guess_games, self.trivia_games, self.riddle_games]:
+                d.pop(room, None)
             reply("🔚 تم إنهاء الألعاب الجارية.")
 
         elif b == "ريستارت" and self.is_admin(nick):
@@ -603,7 +628,7 @@ async def main():
             bot = GamesBot(conn, NICK)
             if not await bot.start():
                 await asyncio.sleep(15); continue
-            
+
             ping_fail = 0
             while conn.connected:
                 await asyncio.sleep(30)
