@@ -1068,7 +1068,7 @@ class GamesBot:
 
         game = self.games.get(room)
 
-        # ── دخول/خروج الغرف ────────────────────────────────
+        # ── دخول/خروج الغرف (أولوية عالية، مستقلة) ──────────
         if msg.startswith("دخول "):
             target = msg.split(maxsplit=1)[1].strip()
             if "@" not in target:
@@ -1083,7 +1083,7 @@ class GamesBot:
             await reply(f"✅ تم دخول الغرفة: {target}")
             return
 
-        elif msg.startswith("خروج "):
+        if msg.startswith("خروج "):
             target = msg.split(maxsplit=1)[1].strip()
             if "@" not in target:
                 target = f"{target}@conference.syriatalk.info"
@@ -1095,7 +1095,7 @@ class GamesBot:
             await reply(f"✅ تم الخروج من الغرفة: {target}")
             return
 
-        elif msg == "الغرف":
+        if msg == "الغرف":
             if self.active_rooms:
                 rooms_list = "\n".join([f"• {r}" for r in sorted(self.active_rooms)])
                 await reply(f"🏠 الغرف النشطة:\n{rooms_list}")
@@ -1103,8 +1103,7 @@ class GamesBot:
                 await reply("🏠 لا يوجد غرف نشطة حالياً.")
             return
 
-        # ── تغيير لقب البوت في الغرفة الحالية ───────────────
-        elif msg.startswith("غير لقبك "):
+        if msg.startswith("غير لقبك "):
             parts = msg.split(maxsplit=2)
             if len(parts) < 3:
                 await reply("❌ استخدم: غير لقبك [الاسم الجديد]")
